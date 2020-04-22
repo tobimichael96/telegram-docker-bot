@@ -16,6 +16,9 @@ You have to pass the container the Docker socket.
 
 You have to add the Telegrambot-Key via environment variable.
 
+You have to label the container you want the bot to handle like this
+`telegram-bot: "NAMEOFTHECONTAINER"`.
+
 ### Sample docker-compose file
 
 ```
@@ -27,4 +30,6 @@ app:
      - BOT_KEY=0123456789:abcdefghijklmn
    volumes:
      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+        telegram-bot: "Container1"
 ```
