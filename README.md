@@ -12,12 +12,12 @@ That's why this bot exists: You can write this bot a message and it start the co
 
 ### Configuration
 
-You have to pass the container the Docker socket.
-
-You have to add the Telegrambot-Key via environment variable.
-
-You have to label the container you want the bot to handle like this
+* You have to pass the container the Docker socket.
+* You have to add the Telegrambot-Key via environment variable.
+* You have to add an admin via `ADMIN_ID`
+* You have to label the container you want the bot to handle like this
 `telegram-bot: "NAMEOFTHECONTAINER"`.
+* If you want to make the DB persistent you have to mount `/telegram-docker-bot/db/`.
 
 ### Sample docker-compose file
 
@@ -30,6 +30,7 @@ app:
      - BOT_KEY=0123456789:abcdefghijklmn
    volumes:
      - /var/run/docker.sock:/var/run/docker.sock
+     - /folder/on/host/:/telegram-docker-bot/db/
     labels:
         telegram-bot: "Container1"
 ```
