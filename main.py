@@ -158,6 +158,14 @@ def stop(update, context):
 	update.message.reply_text("Will be implemented soon!")
 
 
+@admin_restricted
+def users(update, context):
+	allowed_users = ""
+	for u in ALLOWED_USERS:
+		allowed_users = allowed_users + str(u) + "\n"
+	update.message.reply_text(allowed_users)
+
+
 def main():
 	# Create the Updater and pass it your bot's token.
 	# Make sure to set use_context=True to use the new context based callbacks
@@ -168,9 +176,11 @@ def main():
 	updater.dispatcher.add_handler(CommandHandler('help', help))
 	updater.dispatcher.add_handler(CommandHandler('status', status))
 	updater.dispatcher.add_handler(CommandHandler('stop', stop))
+	updater.dispatcher.add_handler(CommandHandler('stop', users))
 	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[sS]tart'), menu))
 	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[sS]tatus'), status))
 	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[sS]top'), stop))
+	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[uU]sers'), users))
 	updater.dispatcher.add_handler(CallbackQueryHandler(answer))
 	updater.dispatcher.add_error_handler(error)
 
@@ -191,18 +201,16 @@ def write_to_db(user_id):
 def read_db():
 	cursor = DB_CON.cursor()
 	cursor.execute('SELECT * FROM allowed_users')
-	users = cursor.fetchall()
-	for line in users:
-		logging.info(line[1])
-	DB_CON.commit()
+	users_db = cursor.fetchall()
+	for line in users_db:
+		ALLOWED_USERS.append(line[1])
 
 
 def init_db():
 	cursor = DB_CON.cursor()
 	cursor.execute('''CREATE TABLE  IF NOT EXISTS allowed_users 
-	(user_id INTEGER PRIMARY KEY, telegram_user_id INT NOT NULL)''')
+	(user_id INTEGER PRIMARY KEY, telegram_user_id INT NOT NULL, unique (user_id, telegram_user_id))''')
 	cursor.execute('INSERT INTO allowed_users (telegram_user_id) VALUES (?)', (ADMIN,))
-	cursor.execute('SELECT * FROM allowed_users')
 	DB_CON.commit()
 
 
@@ -215,6 +223,11 @@ if __name__ == '__main__':
 	update_container()
 	logging.info("Found %d container to handle." % len(CONTAINERS))
 
+	BOT_KEY = os.getenv("BOT_KEY")
+	if not BOT_KEY:
+		logging.error("You have to set the BOT_KEY env in order to use this.")
+		exit(1)
+
 	ALLOWED_USERS = []
 	ADMIN = os.getenv("ADMIN_ID")
 	if not ADMIN:
@@ -223,16 +236,12 @@ if __name__ == '__main__':
 	else:
 		logging.debug("You have added an admin with the ID: %s" % ADMIN)
 		ADMIN = int(ADMIN)
-		ALLOWED_USERS.append(ADMIN)
 
 	DB_CON = sqlite3.connect('telegram-docker-bot/db/allowed_users.db')
-	if os.getenv("FIRST_RUN"):
+	if os.getenv("FIRST_RUN") == "True":
+		logging.info("First run, initializing DB...")
 		init_db()
 	read_db()
-
-	BOT_KEY = os.getenv("BOT_KEY")
-	if not BOT_KEY:
-		logging.error("You have to set the BOT_KEY env in order to use this.")
-		exit(1)
+	logging.info("Found %d allowed users." % len(ALLOWED_USERS))
 
 	main()
