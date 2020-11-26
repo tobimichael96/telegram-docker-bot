@@ -19,4 +19,4 @@ jobs:
       - name: Build the tagged Docker image
         run: docker build . --file Dockerfile --tag ausraster/telegram-docker-bot:latest
       - name: Push the tagged Docker image
-        run: docker push ausraster/telegram-docker-bor:latest
+        run: docker push ausraster/telegram-docker-bot:latest
