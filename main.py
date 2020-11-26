@@ -161,7 +161,7 @@ def main():
     updater.dispatcher.add_handler(CommandHandler('status', status))
     updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tart(?!\S)'), start_container))
     updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tatus(?!\S)'), status))
-    updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]top\(?!\S)'), stop_container))
+    updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]top(?!\S)'), stop_container))
     updater.dispatcher.add_handler(CallbackQueryHandler(answer))
     updater.dispatcher.add_error_handler(error)
 
