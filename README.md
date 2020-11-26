@@ -6,7 +6,7 @@ This is a telegram bot which listens for messages and start docker container.
 
 If you are running Minecraft or Factorio or TeamSpeak3 container and you don't need them
 all the time you might want to stop them in order to save (computing) power, but if you
-need them, you don't want to log in to the server and time those commands in.
+need them, you don't want to log in to the server and type those commands in.
 
 That's why this bot exists: You can write this bot a message and it start the container.
 
@@ -30,6 +30,12 @@ app:
      - BOT_KEY=0123456789:abcdefghijklmn
    volumes:
      - /var/run/docker.sock:/var/run/docker.sock
+```
+
+### Add the labels to containers
+
+Add the labels to the docker compose files of the containers like this:
+```
     labels:
-        telegram-bot: "Container1"
+        telegram-bot: "Minecraft"
 ```
