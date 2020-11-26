@@ -9,6 +9,7 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageH
 
 def update_container():
     containers = DOCKER_CLIENT.containers.list(all=True, filters={"label": "telegram-bot"})
+    CONTAINERS.clear()
     for single_container in containers:
         container_name = single_container.labels
         container_name = container_name.get("telegram-bot")
