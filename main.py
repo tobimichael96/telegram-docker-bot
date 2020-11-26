@@ -40,7 +40,7 @@ def restricted(func):
 def init(update, context):
     keyboard = [[InlineKeyboardButton("Start", callback_data="start")],
                 [InlineKeyboardButton("Status", callback_data="status")],
-                [InlineKeyboardButton("Stop", callback_data="stop")]]
+                [InlineKeyboardButton("Stop (Admin only)", callback_data="stop")]]
     reply_markup = ReplyKeyboardMarkup(keyboard)
     update.message.reply_text("Bot started.", reply_markup=reply_markup)
 
