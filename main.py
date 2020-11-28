@@ -1,10 +1,77 @@
 import logging
 import os
+import sqlite3
 from functools import wraps
 
 import docker
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ChatAction
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
+
+
+def connect_to_db():
+    try:
+        db_connection = sqlite3.connect('/telegram-bot/data/users.db')
+        logging.debug("Connection to database successful.")
+        return db_connection
+    except sqlite3.Error as e:
+        logging.error("Could not connect to database with error: {}.".format(e))
+        return None
+
+
+def init_database():
+    db_connection = connect_to_db()
+    cursor = db_connection.cursor()
+    try:
+        sqlite_create_table_query = "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id " \
+                                    "INTEGER NOT NULL, unique (telegram_id));"
+        cursor.execute(sqlite_create_table_query)
+        db_connection.commit()
+        cursor.close()
+        logging.debug("Database table created.")
+    except sqlite3.Error as e:
+        logging.error("Database initialization not successful with error: {}.".format(e))
+    finally:
+        db_connection.close()
+
+    try:
+        for user in USERS:
+            insert_into_db(user)
+        logging.debug("Users added to database.")
+    except sqlite3.Error as e:
+        logging.error("Could not finish initialization with error: {}.".format(e))
+
+
+def get_users_db():
+    db_connection = connect_to_db()
+    cursor = db_connection.cursor()
+    try:
+        sqlite_get_users = "SELECT telegram_id FROM users;"
+        cursor.execute(sqlite_get_users)
+        users = cursor.fetchall()[0]
+        cursor.close()
+        db_connection.close()
+        logging.info("Users already in database: {}.".format(users))
+        return users
+    except sqlite3.Error as e:
+        logging.warning("Could not get users from db with error: {}.".format(e))
+    finally:
+        db_connection.close()
+
+
+def insert_into_db(user_id):
+    db_connection = connect_to_db()
+    cursor = db_connection.cursor()
+    try:
+        sqlite_insert_into = "INSERT INTO users (telegram_id) VALUES (?);"
+        cursor.execute(sqlite_insert_into, (user_id,))
+        db_connection.commit()
+        cursor.close()
+        logging.info("Inserted user {} into db.".format(user_id))
+    except:
+        logging.debug("Insertion for user {} failed.".format(user_id))
+    finally:
+        cursor.close()
+        db_connection.close()
 
 
 def update_container():
@@ -25,13 +92,35 @@ def send_typing_action(func):
     return command_func
 
 
-def restricted(func):
+def restricted_admin(func):
     @wraps(func)
     def wrapped(update, context, *args, **kwargs):
         user_id = update.effective_user.id
-        if user_id != int(ADMIN):
-            logging.warning("Unauthorized access denied for %s." % user_id)
+        if user_id != ADMIN:
+            logging.warning("Unauthorized access denied for admin with id: {}.".format(user_id))
             update.message.reply_text("You are not allowed to do this.")
+            return
+        return func(update, context, *args, **kwargs)
+
+    return wrapped
+
+
+def restricted_users(func):
+    @wraps(func)
+    def wrapped(update, context, *args, **kwargs):
+        user_id = update.effective_user.id
+        user_name = update.effective_user.name
+        if user_id not in USERS:
+            logging.warning("Unauthorized access denied for user with id: {}.".format(user_id))
+            update.message.reply_text("You are not allowed to do this.")
+
+            keyboard = [[InlineKeyboardButton("Yes", callback_data="add/yes/{}".format(user_id))],
+                        [InlineKeyboardButton("No", callback_data="add/no/{}".format(user_name))]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            context.bot.sendMessage(chat_id=ADMIN,
+                                    text="Do you want to add {} with id {} to the authorized users?".format(user_name,
+                                                                                                            user_id),
+                                    reply_markup=reply_markup)
             return
         return func(update, context, *args, **kwargs)
 
@@ -46,12 +135,13 @@ def init(update, context):
     update.message.reply_text("Bot started.", reply_markup=reply_markup)
 
 
+@restricted_users
 def start_container(update, context):
     update_container()
     keyboard = []
     for container in CONTAINERS:
         if CONTAINERS.get(container).status != "running":
-            keyboard.append([InlineKeyboardButton(container, callback_data="start/request/" + container)])
+            keyboard.append([InlineKeyboardButton(container, callback_data="start/request/{}".format(container))])
     if len(keyboard) > 0:
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text("Which server do you want to start?", reply_markup=reply_markup)
@@ -59,13 +149,13 @@ def start_container(update, context):
         update.message.reply_text("Seems like all servers are already running!")
 
 
-@restricted
+@restricted_admin
 def stop_container(update, context):
     update_container()
     keyboard = []
     for container in CONTAINERS:
         if CONTAINERS.get(container).status == "running":
-            keyboard.append([InlineKeyboardButton(container, callback_data="stop/request/" + container)])
+            keyboard.append([InlineKeyboardButton(container, callback_data="stop/request/{}".format(container))])
     if len(keyboard) > 0:
         reply_markup = InlineKeyboardMarkup(keyboard)
         update.message.reply_text("Which server do you want to stop?", reply_markup=reply_markup)
@@ -75,6 +165,7 @@ def stop_container(update, context):
 
 def answer(update, context):
     query = update.callback_query
+    logging.debug("Request query: {}.".format(query.data))
 
     # CallbackQueries need to be answered, even if no notification to the user is needed
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
@@ -113,25 +204,38 @@ def answer(update, context):
         else:
             query.edit_message_text(text="No servers found with this name.")
             return
-    elif 'no' in query.data:
+    elif "no" in query.data:
         request = query.data.split("/")[0]
-        container_request = query.data.split("/")[2]
-        query.edit_message_text(text="Alright, not going to {} {}.".format(request, container_request))
-    elif 'yes' in query.data:
+        logging.debug("Denied request: {}.".format(request))
+        if request == "start" or request == "stop":
+            container_request = query.data.split("/")[2]
+            query.edit_message_text(text="Alright, not going to {} {}.".format(request, container_request))
+        elif request == "add":
+            user_name = query.data.split("/")[2]
+            # TODO: handle no with a possible ban
+            query.edit_message_text(text="Alright, not going to {} {}.".format(request, user_name))
+    elif "yes" in query.data:
         request = query.data.split("/")[0]
-        container_request = query.data.split("/")[2]
-        query.edit_message_text(text="Going to {} {} now...".format(request, container_request))
-        logger.info("{} {} now!".format(request.capitalize(), container_request))
-        container_to_start = CONTAINERS.get(container_request)
-        if request == "start":
-            container_to_start.start()
-        elif request == "stop":
-            container_to_start.stop()
+        logging.debug("Confirmed request: {}.".format(request))
+        if request == "start" or request == "stop":
+            container_request = query.data.split("/")[2]
+            query.edit_message_text(text="Going to {} {} now...".format(request, container_request))
+            logger.info("{} {} now!".format(request.capitalize(), container_request))
+            container_to_start = CONTAINERS.get(container_request)
+            if request == "start":
+                container_to_start.start()
+            elif request == "stop":
+                container_to_start.stop()
+        elif request == "add":
+            user_id = query.data.split("/")[2]
+            query.edit_message_text(text="Added user with id {} to authroized users.".format(user_id))
+            USERS.append(int(user_id))
+            insert_into_db(int(user_id))
+            logging.warning("Added user to authorized users with id: {}.".format(user_id))
 
 
-def help(update, context):
-    update.message.reply_text("Use /start to use this bot. \n"
-                              "Use /status to check the status of the servers.")
+def print_help(update, context):
+    update.message.reply_text("Use /start to use this bot.")
 
 
 def status(update, context):
@@ -157,7 +261,7 @@ def main():
     updater = Updater(BOT_KEY, use_context=True)
 
     updater.dispatcher.add_handler(CommandHandler('start', init))
-    updater.dispatcher.add_handler(CommandHandler('help', help))
+    updater.dispatcher.add_handler(CommandHandler('help', print_help))
     updater.dispatcher.add_handler(CommandHandler('status', status))
     updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tart(?!\S)'), start_container))
     updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tatus(?!\S)'), status))
@@ -182,11 +286,31 @@ if __name__ == '__main__':
     update_container()
     logging.info("Found %d container to handle." % len(CONTAINERS))
 
-    ADMIN = os.getenv("ADMIN_ID")
+    USERS = []
+    users_env = os.getenv("USER_IDS")
+    if not users_env:
+        logging.info("You have not added any user via env variables.")
+    else:
+        for user in users_env.split(","):
+            USERS.append(int(user))
+        logging.info("You have added {} users.".format(len(USERS)))
+        logging.debug("Users: {}.".format(USERS))
+
+    if not os.path.isfile("/telegram-bot/data/users.db"):
+        init_database()
+    else:
+        users_from_db = get_users_db()
+        if users_from_db is not None:
+            logging.info("Found {} user(s) in db.".format(len(users_from_db)))
+            for user_db in users_from_db:
+                USERS.append(user_db)
+
+    ADMIN = int(os.getenv("ADMIN_ID"))
     if not ADMIN:
         logging.info("You have not added an admin.")
     else:
-        logging.debug("You have added an admin with the ID: %s" % ADMIN)
+        logging.debug("You have added an admin with the id: {}".format(ADMIN))
+        USERS.append(int(ADMIN))
 
     BOT_KEY = os.getenv("BOT_KEY")
     if not BOT_KEY:
