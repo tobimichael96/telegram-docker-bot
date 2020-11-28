@@ -47,7 +47,9 @@ def get_users_db():
     try:
         sqlite_get_users = "SELECT telegram_id FROM users;"
         cursor.execute(sqlite_get_users)
-        users = cursor.fetchall()[0]
+        users = cursor.fetchall()
+        if len(users) > 0:
+            users = users[0]
         cursor.close()
         db_connection.close()
         logging.info("Users already in database: {}.".format(users))
