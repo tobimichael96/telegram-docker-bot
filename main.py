@@ -52,7 +52,6 @@ def get_users_db():
             users = users[0]
         cursor.close()
         db_connection.close()
-        logging.info("Users already in database: {}.".format(users))
         return users
     except sqlite3.Error as e:
         logging.warning("Could not get users from db with error: {}.".format(e))
@@ -306,6 +305,8 @@ if __name__ == '__main__':
             logging.info("Found {} user(s) in db.".format(len(users_from_db)))
             for user_db in users_from_db:
                 USERS.append(user_db)
+        else:
+            logging.info("No users in db found.")
 
     ADMIN = int(os.getenv("ADMIN_ID"))
     if not ADMIN:
