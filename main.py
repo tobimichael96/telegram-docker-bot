@@ -22,8 +22,10 @@ def init_database():
     db_connection = connect_to_db()
     cursor = db_connection.cursor()
     try:
-        sqlite_create_table_query = "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id " \
-                                    "INTEGER NOT NULL, unique (telegram_id));"
+        sqlite_create_table_query = "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, " \
+                                    "telegram_id INTEGER NOT NULL, " \
+                                    "banned INTEGER DEFAULT 0, " \
+                                    "unique (telegram_id));"
         cursor.execute(sqlite_create_table_query)
         db_connection.commit()
         cursor.close()
@@ -34,8 +36,8 @@ def init_database():
         db_connection.close()
 
     try:
-        for user in USERS:
-            insert_into_db(user)
+        for u in USERS:
+            insert_into_db(u)
         logging.debug("Users added to database.")
     except sqlite3.Error as e:
         logging.error("Could not finish initialization with error: {}.".format(e))
@@ -45,29 +47,39 @@ def get_users_db():
     db_connection = connect_to_db()
     cursor = db_connection.cursor()
     try:
-        sqlite_get_users = "SELECT telegram_id FROM users;"
+        banned_users = []
+        authorized_users = []
+        sqlite_get_users = "SELECT telegram_id, banned FROM users;"
         cursor.execute(sqlite_get_users)
         users = cursor.fetchall()
-        if len(users) > 0:
-            users = users[0]
+        for u in users:
+            if u[1] == 1:
+                banned_users.append(u[0])
+            else:
+                authorized_users.append(u[0])
         cursor.close()
         db_connection.close()
-        return users
+        return authorized_users, banned_users
     except sqlite3.Error as e:
         logging.warning("Could not get users from db with error: {}.".format(e))
     finally:
         db_connection.close()
 
 
-def insert_into_db(user_id):
+def insert_into_db(user_id, ban=False):
     db_connection = connect_to_db()
     cursor = db_connection.cursor()
     try:
-        sqlite_insert_into = "INSERT INTO users (telegram_id) VALUES (?);"
+        if ban:
+            sqlite_insert_into = "INSERT INTO users (telegram_id, banned) VALUES (?, 1);"
+            db = "banned"
+        else:
+            sqlite_insert_into = "INSERT INTO users (telegram_id) VALUES (?);"
+            db = "users"
         cursor.execute(sqlite_insert_into, (user_id,))
         db_connection.commit()
         cursor.close()
-        logging.info("Inserted user {} into db.".format(user_id))
+        logging.info("Inserted user {} into {} db.".format(user_id, db))
     except:
         logging.debug("Insertion for user {} failed.".format(user_id))
     finally:
@@ -98,7 +110,7 @@ def restricted_admin(func):
     def wrapped(update, context, *args, **kwargs):
         user_id = update.effective_user.id
         if user_id != ADMIN:
-            logging.warning("Unauthorized access denied for admin with id: {}.".format(user_id))
+            logging.warning("Unauthorized access denied for admin function with id: {}.".format(user_id))
             update.message.reply_text("You are not allowed to do this.")
             return
         return func(update, context, *args, **kwargs)
@@ -115,13 +127,16 @@ def restricted_users(func):
             logging.warning("Unauthorized access denied for user with id: {}.".format(user_id))
             update.message.reply_text("You are not allowed to do this.")
 
-            keyboard = [[InlineKeyboardButton("Yes", callback_data="add/yes/{}".format(user_id))],
-                        [InlineKeyboardButton("No", callback_data="add/no/{}".format(user_name))]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            context.bot.sendMessage(chat_id=ADMIN,
-                                    text="Do you want to add {} with id {} to the authorized users?".format(user_name,
-                                                                                                            user_id),
-                                    reply_markup=reply_markup)
+            if user_id not in BANNED:
+                keyboard = [[InlineKeyboardButton("Yes", callback_data="add/yes/{}/{}".format(user_id, user_name))],
+                            [InlineKeyboardButton("No", callback_data="add/no/{}".format(user_name))],
+                            [InlineKeyboardButton("Ban", callback_data="add/ban/{}/{}".format(user_id, user_name))]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                context.bot.sendMessage(chat_id=ADMIN,
+                                        text="Do you want to add {} with id {} to the authorized users?".format(
+                                            user_name, user_id), reply_markup=reply_markup)
+            else:
+                logging.warning("User ({}) with id {} already banned.".format(user_name, user_id))
             return
         return func(update, context, *args, **kwargs)
 
@@ -205,6 +220,14 @@ def answer(update, context):
         else:
             query.edit_message_text(text="No servers found with this name.")
             return
+    elif "ban" in query.data:
+        request = query.data.split("/")[0]
+        if request == "add":
+            user_id = int(query.data.split("/")[2])
+            user_name = query.data.split("/")[3]
+            BANNED.append(user_id)
+            insert_into_db(user_id, ban=True)
+            query.edit_message_text(text="Alright, added {} to banned users.".format(user_name))
     elif "no" in query.data:
         request = query.data.split("/")[0]
         logging.debug("Denied request: {}.".format(request))
@@ -213,7 +236,6 @@ def answer(update, context):
             query.edit_message_text(text="Alright, not going to {} {}.".format(request, container_request))
         elif request == "add":
             user_name = query.data.split("/")[2]
-            # TODO: handle no with a possible ban
             query.edit_message_text(text="Alright, not going to {} {}.".format(request, user_name))
     elif "yes" in query.data:
         request = query.data.split("/")[0]
@@ -228,10 +250,11 @@ def answer(update, context):
             elif request == "stop":
                 container_to_start.stop()
         elif request == "add":
-            user_id = query.data.split("/")[2]
-            query.edit_message_text(text="Added user with id {} to authroized users.".format(user_id))
-            USERS.append(int(user_id))
-            insert_into_db(int(user_id))
+            user_id = int(query.data.split("/")[2])
+            user_name = query.data.split("/")[3]
+            query.edit_message_text(text="Added user ({}) with id {} to authroized users.".format(user_name, user_id))
+            USERS.append(user_id)
+            insert_into_db(user_id)
             logging.warning("Added user to authorized users with id: {}.".format(user_id))
 
 
@@ -263,7 +286,6 @@ def main():
 
     updater.dispatcher.add_handler(CommandHandler('start', init))
     updater.dispatcher.add_handler(CommandHandler('help', print_help))
-    updater.dispatcher.add_handler(CommandHandler('status', status))
     updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tart(?!\S)'), start_container))
     updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tatus(?!\S)'), status))
     updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]top(?!\S)'), stop_container))
@@ -288,6 +310,7 @@ if __name__ == '__main__':
     logging.info("Found %d container to handle." % len(CONTAINERS))
 
     USERS = []
+    BANNED = []
     users_env = os.getenv("USER_IDS")
     if not users_env:
         logging.info("You have not added any user via env variables.")
@@ -300,13 +323,19 @@ if __name__ == '__main__':
     if not os.path.isfile("/telegram-bot/data/users.db"):
         init_database()
     else:
-        users_from_db = get_users_db()
-        if users_from_db is not None:
-            logging.info("Found {} user(s) in db.".format(len(users_from_db)))
-            for user_db in users_from_db:
-                USERS.append(user_db)
+        authorized_us, banned_us = get_users_db()
+        if len(authorized_us) > 0:
+            logging.info("Found {} authorized user(s) in db.".format(len(authorized_us)))
+            for authorized_u in authorized_us:
+                USERS.append(authorized_u)
         else:
-            logging.info("No users in db found.")
+            logging.info("No authorized users in db found.")
+        if len(banned_us) > 0:
+            logging.info("Found {} banned user(s) in db.".format(len(banned_us)))
+            for banned_u in banned_us:
+                BANNED.append(banned_u)
+        else:
+            logging.info("No banned users in db found.")
 
     ADMIN = int(os.getenv("ADMIN_ID"))
     if not ADMIN:
