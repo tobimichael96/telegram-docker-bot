@@ -13,9 +13,11 @@ That's why this bot exists: You can write this bot a message and it start the co
 ### What does it do?
 
 You can:
-* Get that status of the managed containers
-* Start the managed containers (only authorized users)
-* Stop the managed containers (only admin)
+* `Status`: get that status of the managed containers
+* `Start`: to start the managed containers (only authorized users)
+* `Stop`: to stop the managed containers (only admin)
+
+![Screenshot 1](screenshot_1.jpg "screenshot basic usage")
 
 If a user that is not authorized tries to use the start command, the admin
 will get a message that will allow them to either *add*, *ignore* or *ban* the
