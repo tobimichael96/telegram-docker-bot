@@ -1,247 +1,352 @@
 import logging
 import os
-from functools import wraps
 import sqlite3
+from functools import wraps
 
 import docker
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ChatAction
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
 
 
+def connect_to_db():
+    try:
+        db_connection = sqlite3.connect('/telegram-bot/data/users.db')
+        logging.debug("Connection to database successful.")
+        return db_connection
+    except sqlite3.Error as e:
+        logging.error("Could not connect to database with error: {}.".format(e))
+        return None
+
+
+def init_database():
+    db_connection = connect_to_db()
+    cursor = db_connection.cursor()
+    try:
+        sqlite_create_table_query = "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, " \
+                                    "telegram_id INTEGER NOT NULL, " \
+                                    "banned INTEGER DEFAULT 0, " \
+                                    "unique (telegram_id));"
+        cursor.execute(sqlite_create_table_query)
+        db_connection.commit()
+        cursor.close()
+        logging.debug("Database table created.")
+    except sqlite3.Error as e:
+        logging.error("Database initialization not successful with error: {}.".format(e))
+    finally:
+        db_connection.close()
+
+    try:
+        for u in USERS:
+            insert_into_db(u)
+        logging.debug("Users added to database.")
+    except sqlite3.Error as e:
+        logging.error("Could not finish initialization with error: {}.".format(e))
+
+
+def get_users_db():
+    db_connection = connect_to_db()
+    cursor = db_connection.cursor()
+    try:
+        banned_users = []
+        authorized_users = []
+        sqlite_get_users = "SELECT telegram_id, banned FROM users;"
+        cursor.execute(sqlite_get_users)
+        users = cursor.fetchall()
+        for u in users:
+            if u[1] == 1:
+                banned_users.append(u[0])
+            else:
+                authorized_users.append(u[0])
+        cursor.close()
+        db_connection.close()
+        return authorized_users, banned_users
+    except sqlite3.Error as e:
+        logging.warning("Could not get users from db with error: {}.".format(e))
+    finally:
+        db_connection.close()
+
+
+def insert_into_db(user_id, ban=False):
+    db_connection = connect_to_db()
+    cursor = db_connection.cursor()
+    try:
+        if ban:
+            sqlite_insert_into = "INSERT INTO users (telegram_id, banned) VALUES (?, 1);"
+            db = "banned"
+        else:
+            sqlite_insert_into = "INSERT INTO users (telegram_id) VALUES (?);"
+            db = "users"
+        cursor.execute(sqlite_insert_into, (user_id,))
+        db_connection.commit()
+        cursor.close()
+        logging.info("Inserted user {} into {} db.".format(user_id, db))
+    except:
+        logging.debug("Insertion for user {} failed.".format(user_id))
+    finally:
+        cursor.close()
+        db_connection.close()
+
+
 def update_container():
-	CONTAINERS.clear()
-	containers = DOCKER_CLIENT.containers.list(all=True, filters={"label": "telegram-bot"})
-	for single_container in containers:
-		container_name = single_container.labels
-		container_name = container_name.get("telegram-bot")
-		CONTAINERS.update({container_name: single_container})
+    containers = DOCKER_CLIENT.containers.list(all=True, filters={"label": "telegram-bot"})
+    CONTAINERS.clear()
+    for single_container in containers:
+        container_name = single_container.labels
+        container_name = container_name.get("telegram-bot")
+        CONTAINERS.update({container_name: single_container})
 
 
 def send_typing_action(func):
-	@wraps(func)
-	def command_func(update, context, *args, **kwargs):
-		context.bot.send_chat_action(chat_id=update.effective_message.chat_id, action=ChatAction.TYPING)
-		return func(update, context, *args, **kwargs)
+    @wraps(func)
+    def command_func(update, context, *args, **kwargs):
+        context.bot.send_chat_action(chat_id=update.effective_message.chat_id, action=ChatAction.TYPING)
+        return func(update, context, *args, **kwargs)
 
-	return command_func
-
-
-def admin_restricted(func):
-	@wraps(func)
-	def wrapped(update, context, *args, **kwargs):
-		user_id = update.effective_user.id
-		if user_id != ADMIN:
-			logging.error("Unauthorized access denied for %s." % user_id)
-			return
-		return func(update, context, *args, **kwargs)
-
-	return wrapped
+    return command_func
 
 
-def user_restricted(func):
-	@wraps(func)
-	def wrapped(update, context, *args, **kwargs):
-		user_id = update.effective_user.id
-		if user_id not in ALLOWED_USERS:
-			logging.error("User %s not allowed." % user_id)
-			keyboard = [[InlineKeyboardButton('Yes', callback_data='add_request/' + str(user_id))],
-			            [InlineKeyboardButton('No', callback_data='no')]]
-			reply_markup = InlineKeyboardMarkup(keyboard)
-			update.message.reply_text(text="Do you want to request to get added to the allowed users?",
-			                          reply_markup=reply_markup)
-			return
-		return func(update, context, *args, **kwargs)
+def restricted_admin(func):
+    @wraps(func)
+    def wrapped(update, context, *args, **kwargs):
+        user_id = update.effective_user.id
+        if user_id != ADMIN:
+            logging.warning("Unauthorized access denied for admin function with id: {}.".format(user_id))
+            update.message.reply_text("You are not allowed to do this.")
+            return
+        return func(update, context, *args, **kwargs)
 
-	return wrapped
+    return wrapped
 
 
-@user_restricted
-def start(update, context):
-	keyboard = [[InlineKeyboardButton("Start", callback_data="start")],
-	            [InlineKeyboardButton("Status", callback_data="status")]]
-	reply_markup = ReplyKeyboardMarkup(keyboard)
-	update.message.reply_text("Bot started.", reply_markup=reply_markup)
+def restricted_users(func):
+    @wraps(func)
+    def wrapped(update, context, *args, **kwargs):
+        user_id = update.effective_user.id
+        user_name = update.effective_user.name
+        if user_id not in USERS:
+            logging.warning("Unauthorized access denied for user with id: {}.".format(user_id))
+            update.message.reply_text("You are not allowed to do this.")
+
+            if user_id not in BANNED and ADMIN:
+                keyboard = [[InlineKeyboardButton("Yes", callback_data="add/yes/{}/{}".format(user_id, user_name))],
+                            [InlineKeyboardButton("No", callback_data="add/no/{}".format(user_name))],
+                            [InlineKeyboardButton("Ban", callback_data="add/ban/{}/{}".format(user_id, user_name))]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                context.bot.sendMessage(chat_id=ADMIN,
+                                        text="Do you want to add {} with id {} to the authorized users?".format(
+                                            user_name, user_id), reply_markup=reply_markup)
+            else:
+                logging.warning("User ({}) with id {} already banned.".format(user_name, user_id))
+            return
+        return func(update, context, *args, **kwargs)
+
+    return wrapped
 
 
-@user_restricted
-def menu(update, context):
-	update_container()
-	keyboard = []
-	for container in CONTAINERS:
-		if CONTAINERS.get(container).status != "running":
-			keyboard.append([InlineKeyboardButton(container, callback_data="start_request/" + container)])
-	if len(keyboard) > 0:
-		reply_markup = InlineKeyboardMarkup(keyboard)
-		update.message.reply_text("Which server do you want to start?", reply_markup=reply_markup)
-	else:
-		update.message.reply_text("Seems like all servers are already running!")
+def init(update, context):
+    keyboard = [[InlineKeyboardButton("Start", callback_data="start")],
+                [InlineKeyboardButton("Status", callback_data="status")],
+                [InlineKeyboardButton("Stop", callback_data="stop")]]
+    reply_markup = ReplyKeyboardMarkup(keyboard)
+    update.message.reply_text("Bot started.", reply_markup=reply_markup)
+
+
+@restricted_users
+def start_container(update, context):
+    update_container()
+    keyboard = []
+    for container in CONTAINERS:
+        if CONTAINERS.get(container).status != "running":
+            keyboard.append([InlineKeyboardButton(container, callback_data="start/request/{}".format(container))])
+    if len(keyboard) > 0:
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text("Which server do you want to start?", reply_markup=reply_markup)
+    else:
+        update.message.reply_text("Seems like all servers are already running!")
+
+
+@restricted_admin
+def stop_container(update, context):
+    update_container()
+    keyboard = []
+    for container in CONTAINERS:
+        if CONTAINERS.get(container).status == "running":
+            keyboard.append([InlineKeyboardButton(container, callback_data="stop/request/{}".format(container))])
+    if len(keyboard) > 0:
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text("Which server do you want to stop?", reply_markup=reply_markup)
+    else:
+        update.message.reply_text("Seems like all servers are already stopped!")
 
 
 def answer(update, context):
-	query = update.callback_query
+    query = update.callback_query
+    logging.debug("Request query: {}.".format(query.data))
 
-	# CallbackQueries need to be answered, even if no notification to the user is needed
-	# Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
-	query.answer()
+    # CallbackQueries need to be answered, even if no notification to the user is needed
+    # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
+    query.answer()
 
-	update_container()
+    update_container()
+    if "start/request" in query.data:
+        container_request = query.data.split("/")[2]
+        container = CONTAINERS.get(container_request)
+        if container:
+            if container.status == "running":
+                query.edit_message_text(text="{} is already running, go and have fun!".format(container_request))
+                return
+            else:
+                keyboard = [[InlineKeyboardButton("Yes", callback_data='start/yes/' + container_request),
+                             InlineKeyboardButton("No", callback_data='start/no/' + container_request)]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                query.edit_message_text(text="Do you really want to start {}?".format(container_request),
+                                        reply_markup=reply_markup)
+        else:
+            query.edit_message_text(text="No servers found with this name.")
+            return
+    if "stop/request" in query.data:
+        container_request = query.data.split("/")[2]
+        container = CONTAINERS.get(container_request)
+        if container:
+            if container.status != "running":
+                query.edit_message_text(text="{} is already stopped, you can start it now!".format(container_request))
+                return
+            else:
+                keyboard = [[InlineKeyboardButton("Yes", callback_data='stop/yes/' + container_request),
+                             InlineKeyboardButton("No", callback_data='stop/no/' + container_request)]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                query.edit_message_text(text="Do you really want to stop {}?".format(container_request),
+                                        reply_markup=reply_markup)
+        else:
+            query.edit_message_text(text="No servers found with this name.")
+            return
+    elif "ban" in query.data:
+        request = query.data.split("/")[0]
+        if request == "add":
+            user_id = int(query.data.split("/")[2])
+            user_name = query.data.split("/")[3]
+            BANNED.append(user_id)
+            insert_into_db(user_id, ban=True)
+            query.edit_message_text(text="Alright, added {} to banned users.".format(user_name))
+    elif "no" in query.data:
+        request = query.data.split("/")[0]
+        logging.debug("Denied request: {}.".format(request))
+        if request == "start" or request == "stop":
+            container_request = query.data.split("/")[2]
+            query.edit_message_text(text="Alright, not going to {} {}.".format(request, container_request))
+        elif request == "add":
+            user_name = query.data.split("/")[2]
+            query.edit_message_text(text="Alright, not going to {} {}.".format(request, user_name))
+    elif "yes" in query.data:
+        request = query.data.split("/")[0]
+        logging.debug("Confirmed request: {}.".format(request))
+        if request == "start" or request == "stop":
+            container_request = query.data.split("/")[2]
+            query.edit_message_text(text="Going to {} {} now...".format(request, container_request))
+            logger.info("{} {} now!".format(request.capitalize(), container_request))
+            container_to_start = CONTAINERS.get(container_request)
+            if request == "start":
+                container_to_start.start()
+            elif request == "stop":
+                container_to_start.stop()
+        elif request == "add":
+            user_id = int(query.data.split("/")[2])
+            user_name = query.data.split("/")[3]
+            query.edit_message_text(text="Added user ({}) with id {} to authroized users.".format(user_name, user_id))
+            USERS.append(user_id)
+            insert_into_db(user_id)
+            logging.warning("Added user to authorized users with id: {}.".format(user_id))
 
-	if "add_request" in query.data:
-		logging.info(update)
-		query.edit_message_text(text="Your request was sent to the Admin.")
-		keyboard = [[InlineKeyboardButton('Yes', callback_data='add_user/' + str(update.effective_user.id)),
-		             InlineKeyboardButton('No', callback_data='denied_user')]]
-		reply_markup = InlineKeyboardMarkup(keyboard)
-		context.bot.send_message(chat_id=ADMIN, text="Do you want to add %s to the allowed users?"
-		                                             % update.effective_user.id, reply_markup=reply_markup)
-	elif "add_user" in query.data:
-		if update.effective_user.id == ADMIN:
-			member = query.data.split("/")[1]
-			logging.info("Added new user to allowed list: %s." % member)
-			context.bot.send_message(chat_id=member, text="You were added to the allowed user group.")
-			query.edit_message_text(text="User %s was added to allowed user group." % member)
-			ALLOWED_USERS.append(int(member))
-			write_to_db(int(member))
-		else:
-			logging.error("Not admin user (%s) tried to gain more power." % update.effective_user.id)
-	elif "denied_user" in query.data:
-		query.edit_message_text(text="User was not added to allowed user group.")
-		logging.info("User was not added to allowed user group.")
-	elif "start_request" in query.data:
-		container_request = query.data.split("/")[1]
-		container = CONTAINERS.get(container_request)
-		if container:
-			if container.status == "running":
-				query.edit_message_text(text="%s is already running, go and have fun!" % container_request)
-			else:
-				keyboard = [[InlineKeyboardButton('Yes', callback_data='yes/' + container_request),
-				             InlineKeyboardButton('No', callback_data='no')]]
-				reply_markup = InlineKeyboardMarkup(keyboard)
-				query.edit_message_text(text="Do you really want to start the %s server?" %
-				                             container_request, reply_markup=reply_markup)
-		else:
-			query.edit_message_text(text="No servers found with this name.")
-	elif 'no' in query.data:
-		query.edit_message_text(text="Alright, nothing to do for me. I like that!")
-	elif 'yes' in query.data:
-		container_request = query.data.split("/")[1]
-		query.edit_message_text(text="Going to start %s now..." % container_request)
-		logger.info("Starting %s now!" % container_request)
-		container_to_start = CONTAINERS.get(container_request)
-		container_to_start.start()
 
-
-def help(update, context):
-	update.message.reply_text("Use /start to use this bot. \n"
-	                          "Use /status to check the status of the servers.")
+def print_help(update, context):
+    update.message.reply_text("Use /start to use this bot.")
 
 
 def status(update, context):
-	update_container()
-	status_message = ""
-	for container in CONTAINERS:
-		if CONTAINERS.get(container).status == "running":
-			container_status = "running"
-		else:
-			container_status = "not running"
-		status_message = status_message + container + " is " + container_status + ".\n"
-	update.message.reply_text(status_message)
+    update_container()
+    status_message = ""
+    for container in CONTAINERS:
+        if CONTAINERS.get(container).status == "running":
+            container_status = "running"
+        else:
+            container_status = "not running"
+        status_message = status_message + container + " is " + container_status + ".\n"
+    update.message.reply_text(status_message)
 
 
 def error(update, context):
-	logger.warning('Update "%s" caused error "%s"', update, context.error)
-
-
-@admin_restricted
-def stop(update, context):
-	# TODO: implement admin function to stop container
-	update.message.reply_text("Will be implemented soon!")
-
-
-@admin_restricted
-def users(update, context):
-	allowed_users = ""
-	for u in ALLOWED_USERS:
-		allowed_users = allowed_users + str(u) + "\n"
-	update.message.reply_text(allowed_users)
+    logger.warning('Update "%s" caused error "%s"', update, context.error)
 
 
 def main():
-	# Create the Updater and pass it your bot's token.
-	# Make sure to set use_context=True to use the new context based callbacks
-	# Post version 12 this will no longer be necessary
-	updater = Updater(BOT_KEY, use_context=True)
+    # Create the Updater and pass it your bot's token.
+    # Make sure to set use_context=True to use the new context based callbacks
+    # Post version 12 this will no longer be necessary
+    updater = Updater(BOT_KEY, use_context=True)
 
-	updater.dispatcher.add_handler(CommandHandler('start', start))
-	updater.dispatcher.add_handler(CommandHandler('help', help))
-	updater.dispatcher.add_handler(CommandHandler('status', status))
-	updater.dispatcher.add_handler(CommandHandler('stop', stop))
-	updater.dispatcher.add_handler(CommandHandler('stop', users))
-	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[sS]tart'), menu))
-	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[sS]tatus'), status))
-	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[sS]top'), stop))
-	updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'[uU]sers'), users))
-	updater.dispatcher.add_handler(CallbackQueryHandler(answer))
-	updater.dispatcher.add_error_handler(error)
+    updater.dispatcher.add_handler(CommandHandler('start', init))
+    updater.dispatcher.add_handler(CommandHandler('help', print_help))
+    updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tart(?!\S)'), start_container))
+    updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]tatus(?!\S)'), status))
+    updater.dispatcher.add_handler(MessageHandler(Filters.regex(r'^[sS]top(?!\S)'), stop_container))
+    updater.dispatcher.add_handler(CallbackQueryHandler(answer))
+    updater.dispatcher.add_error_handler(error)
 
-	# Start the Bot
-	updater.start_polling()
+    # Start the Bot
+    updater.start_polling()
 
-	# Run the bot until the user presses Ctrl-C or the process receives SIGINT,
-	# SIGTERM or SIGABRT
-	updater.idle()
-
-
-def write_to_db(user_id):
-	cursor = DB_CON.cursor()
-	cursor.execute('INSERT INTO allowed_users (telegram_user_id) VALUES (?)', (user_id,))
-	DB_CON.commit()
-
-
-def read_db():
-	cursor = DB_CON.cursor()
-	cursor.execute('SELECT * FROM allowed_users')
-	users_db = cursor.fetchall()
-	for line in users_db:
-		ALLOWED_USERS.append(line[1])
-
-
-def init_db():
-	cursor = DB_CON.cursor()
-	cursor.execute('''CREATE TABLE  IF NOT EXISTS allowed_users 
-	(user_id INTEGER PRIMARY KEY, telegram_user_id INT NOT NULL, unique (user_id, telegram_user_id))''')
-	cursor.execute('INSERT INTO allowed_users (telegram_user_id) VALUES (?)', (ADMIN,))
-	DB_CON.commit()
+    # Run the bot until the user presses Ctrl-C or the process receives SIGINT,
+    # SIGTERM or SIGABRT
+    updater.idle()
 
 
 if __name__ == '__main__':
-	logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-	logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
 
-	DOCKER_CLIENT = docker.DockerClient(base_url='unix://var/run/docker.sock')
-	CONTAINERS = {}
-	update_container()
-	logging.info("Found %d container to handle." % len(CONTAINERS))
+    DOCKER_CLIENT = docker.DockerClient(base_url='unix://var/run/docker.sock')
+    CONTAINERS = {}
+    update_container()
+    logging.info("Found %d container to handle." % len(CONTAINERS))
 
-	BOT_KEY = os.getenv("BOT_KEY")
-	if not BOT_KEY:
-		logging.error("You have to set the BOT_KEY env in order to use this.")
-		exit(1)
+    USERS = []
+    BANNED = []
+    users_env = os.getenv("USER_IDS")
+    if not users_env:
+        logging.info("You have not added any user via env variables.")
+    else:
+        for user in users_env.split(","):
+            USERS.append(int(user))
+        logging.info("You have added {} users.".format(len(USERS)))
+        logging.debug("Users: {}.".format(USERS))
 
-	ALLOWED_USERS = []
-	ADMIN = os.getenv("ADMIN_ID")
-	if not ADMIN:
-		logging.error("You have not added an admin.")
-		exit(1)
-	else:
-		logging.debug("You have added an admin with the ID: %s" % ADMIN)
-		ADMIN = int(ADMIN)
+    if not os.path.isfile("/telegram-bot/data/users.db"):
+        init_database()
+    else:
+        authorized_us, banned_us = get_users_db()
+        if len(authorized_us) > 0:
+            logging.info("Found {} authorized user(s) in db.".format(len(authorized_us)))
+            for authorized_u in authorized_us:
+                USERS.append(authorized_u)
+        else:
+            logging.info("No authorized users in db found.")
+        if len(banned_us) > 0:
+            logging.info("Found {} banned user(s) in db.".format(len(banned_us)))
+            for banned_u in banned_us:
+                BANNED.append(banned_u)
+        else:
+            logging.info("No banned users in db found.")
 
-	DB_CON = sqlite3.connect('telegram-docker-bot/db/allowed_users.db')
-	if os.getenv("FIRST_RUN") == "True":
-		logging.info("First run, initializing DB...")
-		init_db()
-	read_db()
-	logging.info("Found %d allowed users." % len(ALLOWED_USERS))
+    ADMIN = int(os.getenv("ADMIN_ID"))
+    if not ADMIN:
+        logging.info("You have not added an admin.")
+    else:
+        logging.debug("You have added an admin with the id: {}".format(ADMIN))
+        USERS.append(int(ADMIN))
 
-	main()
+    BOT_KEY = os.getenv("BOT_KEY")
+    if not BOT_KEY:
+        logging.error("You have to set the BOT_KEY env in order to use this.")
+        exit(1)
+
+    main()
