@@ -127,7 +127,7 @@ def restricted_users(func):
             logging.warning("Unauthorized access denied for user with id: {}.".format(user_id))
             update.message.reply_text("You are not allowed to do this.")
 
-            if user_id not in BANNED:
+            if user_id not in BANNED and ADMIN:
                 keyboard = [[InlineKeyboardButton("Yes", callback_data="add/yes/{}/{}".format(user_id, user_name))],
                             [InlineKeyboardButton("No", callback_data="add/no/{}".format(user_name))],
                             [InlineKeyboardButton("Ban", callback_data="add/ban/{}/{}".format(user_id, user_name))]]
@@ -146,7 +146,7 @@ def restricted_users(func):
 def init(update, context):
     keyboard = [[InlineKeyboardButton("Start", callback_data="start")],
                 [InlineKeyboardButton("Status", callback_data="status")],
-                [InlineKeyboardButton("Stop (Admin only)", callback_data="stop")]]
+                [InlineKeyboardButton("Stop", callback_data="stop")]]
     reply_markup = ReplyKeyboardMarkup(keyboard)
     update.message.reply_text("Bot started.", reply_markup=reply_markup)
 

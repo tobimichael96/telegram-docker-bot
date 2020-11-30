@@ -10,6 +10,23 @@ need them, you don't want to log in to the server and type those commands in.
 
 That's why this bot exists: You can write this bot a message and it start the container.
 
+### What does it do?
+
+You can:
+* Get that status of the managed containers
+* Start the managed containers (only authorized users)
+* Stop the managed containers (only admin)
+
+If a user that is not authorized tries to use the start command, the admin
+will get a message that will allow them to either *add*, *ignore* or *ban* the
+user.
+* `Yes`: adds the user to the authorized users
+* `No`: ignores the users request
+* `Ban`: adds the user to the banned users
+
+If you add a user to the banned users, the bot will not ask again if you
+want to add the user to the authorized users. This will prevent spam.
+
 ### Configuration
 
 You have to pass the container the Docker socket.
@@ -30,6 +47,7 @@ app:
      - BOT_KEY=0123456789:abcdefghijklmn
    volumes:
      - /var/run/docker.sock:/var/run/docker.sock
+     - /folder/on/host/system/data/:/telegram-bot/data/
 ```
 
 ### Add the labels to containers
