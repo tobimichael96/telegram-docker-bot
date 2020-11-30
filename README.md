@@ -1,5 +1,7 @@
 # telegram docker bot
 
+![Docker Image CI](https://github.com/TobiMichael96/telegram-docker-bot/workflows/Docker%20Image%20CI/badge.svg?branch=master)
+
 This is a telegram bot which listens for messages and start docker container.
 
 ### Use case
