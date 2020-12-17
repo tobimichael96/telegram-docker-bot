@@ -52,7 +52,7 @@ app:
    environment:
      - ADMIN_ID=0123456789
      - BOT_KEY=0123456789:abcdefghijklmn
-     - SCHEDULE='
+     - SCHEDULE=0 5 * * *
    volumes:
      - /var/run/docker.sock:/var/run/docker.sock
      - /folder/on/host/system/data/:/telegram-bot/data/
