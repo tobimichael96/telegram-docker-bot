@@ -264,13 +264,13 @@ def print_help(update, context):
 
 def status(update, context):
     update_container()
-    status_message = "* "
+    status_message = ""
     for container in CONTAINERS:
         if CONTAINERS.get(container).status == "running":
             container_status = "*running*"
         else:
             container_status = "*not running*"
-        status_message = status_message + container + " is " + container_status + ".\n"
+        status_message = status_message + "*" + container + "* is " + container_status + ".\n"
     update.message.reply_text(status_message, parse_mode='MarkdownV2')
 
 
