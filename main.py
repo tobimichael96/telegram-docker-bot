@@ -2,6 +2,7 @@ import logging
 import os
 import sqlite3
 from functools import wraps
+import emoji
 
 import docker
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ChatAction
@@ -265,8 +266,8 @@ def print_help(update, context):
 def status(update, context):
     update_container()
     status_message = ""
-    running = "\xE2\x9C\x85"
-    stopped = "\xE2\x9D\x8C"
+    running = ":white_check_mark:"
+    stopped = ":x:"
 
     for container in CONTAINERS:
         if CONTAINERS.get(container).status == "running":
@@ -275,7 +276,7 @@ def status(update, context):
         else:
             icon = running
             container_status = "not running"
-        status_message = status_message + icon + " " + container + " is " + container_status + ".\n"
+        status_message = status_message + emoji.emojize(icon) + " " + container + " is " + container_status + ".\n"
     update.message.reply_text(status_message)
 
 
