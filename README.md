@@ -40,6 +40,9 @@ You have to add the Telegrambot-Key via environment variable.
 You have to label the container you want the bot to handle like this
 `telegram-bot: "NAMEOFTHECONTAINER"`.
 
+You can add a `SCHEDULE` environment variable that will stop labeled containers 
+at the given time. The schedule has to be in the cron format.
+
 ### Sample docker-compose file
 
 ```
@@ -49,6 +52,7 @@ app:
    environment:
      - ADMIN_ID=0123456789
      - BOT_KEY=0123456789:abcdefghijklmn
+     - SCHEDULE='
    volumes:
      - /var/run/docker.sock:/var/run/docker.sock
      - /folder/on/host/system/data/:/telegram-bot/data/
