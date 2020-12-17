@@ -275,7 +275,7 @@ def status(update, context):
         else:
             icon = running
             container_status = "not running"
-        status_message = status_message + icon + " " + container + " is " + container_status + "\n"
+        status_message = status_message + icon + " " + container + " is " + container_status + ".\n"
     update.message.reply_text(status_message)
 
 
