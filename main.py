@@ -264,7 +264,7 @@ def print_help(update, context):
 
 def status(update, context):
     update_container()
-    status_message = "- "
+    status_message = "* "
     for container in CONTAINERS:
         if CONTAINERS.get(container).status == "running":
             container_status = "*running*"
