@@ -265,13 +265,19 @@ def print_help(update, context):
 def status(update, context):
     update_container()
     status_message = ""
+    running = '\u2705'
+    stopped = '\u274C'
+
     for container in CONTAINERS:
         if CONTAINERS.get(container).status == "running":
             container_status = "running"
+            icon = running
         else:
+            icon = stopped
             container_status = "not running"
-        status_message = status_message + container + " is " + container_status + ".\n"
-    update.message.reply_text(status_message)
+
+        status_message = status_message + icon + " *" + container + "* is " + container_status + "\.\n"
+    update.message.reply_text(status_message, parse_mode='MarkdownV2')
 
 
 def error(update, context):

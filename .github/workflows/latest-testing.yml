@@ -1,0 +1,19 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches:
+      - testing
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+      - name: Login to DockerHub Registry
+        run: echo ${{ secrets.DOCKERHUB_PASSWORD }} | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+      - name: Build the tagged Docker image
+        run: docker build . --file Dockerfile --tag ausraster/telegram-docker-bot:testing
+      - name: Push the tagged Docker image
+        run: docker push ausraster/telegram-docker-bot:testing
