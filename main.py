@@ -270,13 +270,13 @@ def status(update, context):
 
     for container in CONTAINERS:
         if CONTAINERS.get(container).status == "running":
-            container_status = "*running*"
+            container_status = "running"
             icon = stopped
         else:
             icon = running
-            container_status = "*not running*"
+            container_status = "not running"
         status_message = status_message + icon + " " + container + " is " + container_status + "\n"
-    update.message.reply_text(status_message, parse_mode='MarkdownV2')
+    update.message.reply_text(status_message)
 
 
 def error(update, context):
