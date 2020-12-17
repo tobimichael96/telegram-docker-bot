@@ -265,8 +265,8 @@ def print_help(update, context):
 def status(update, context):
     update_container()
     status_message = ""
-    running = u'\2705'
-    stopped = u'\274C'
+    running = ":white_check_mark:"
+    stopped = ":x:"
 
     for container in CONTAINERS:
         if CONTAINERS.get(container).status == "running":
